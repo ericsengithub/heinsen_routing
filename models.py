@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from heinsen_routing import Routing
+from transformers import GPT2Model
+# from pytorch_transformers import GPT2Model, GPT2Tokenizer
 
 
 class Swish(nn.Module):
@@ -11,7 +13,43 @@ class Swish(nn.Module):
     def forward(self, x):
         return x * x.sigmoid()
 
-
+class GPT2Classifier(nn.Module):
+    def __init__(self, n_classes):
+        super(GPT2Classifier, self).__init__()
+        self.GPT2 = GPT2Model.from_pretrained('gpt2-large')
+        
+        self.rnn = nn.GRU(self.GPT2.config.hidden_size,
+                  256,
+                  num_layers = 2,
+                  bidirectional = True,
+                  batch_first = True)
+        
+        self.out = nn.Linear(256 * 2, n_classes)
+    
+    def forward(self, masks, input_ids):
+        # Ideally we would fine tune but it is way too large.
+        # cite: https://github.com/bentrevett/pytorch-sentiment-analysis/blob/master/6%20-%20Transformers%20for%20Sentiment%20Analysis.ipynb
+        with torch.no_grad():
+            embedded = self.GPT2(input_ids=input_ids, attention_mask=masks)[0]
+        
+        _, hidden = self.rnn(embedded)
+        
+        #hidden = [n layers * n directions, batch size, emb dim]
+        #  TODO: Incorperate dropout at somepoint
+        if self.rnn.bidirectional:
+            hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1)
+                
+        #hidden = [batch size, hid dim]
+        
+        output = self.out(hidden)
+        
+        #output = [batch size, out dim]
+        
+        return output
+        
+    
+    
+    
 class SSTClassifier(nn.Module):
     """
     Args:

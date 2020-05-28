@@ -69,13 +69,13 @@ class SSTClassifier(nn.Module):
         mu_out: [..., n_classes, 1, d_cap] class capsules.
         sig2_out: [..., n_classes, 1, d_cap] class capsule variances.
     """
-    def __init__(self, d_depth, d_emb, d_inp, d_cap, n_parts, n_classes):
+    def __init__(self, d_depth, d_emb, d_inp, d_cap, n_parts, n_classes, n_iters=3):
         super().__init__()
         self.depth_emb = nn.Parameter(torch.zeros(d_depth, d_emb))
         self.detect_parts = nn.Sequential(nn.Linear(d_emb, d_inp), Swish(), nn.LayerNorm(d_inp))
         self.routings = nn.Sequential(
-            Routing(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts),
-            Routing(d_cov=1, d_inp=d_cap, d_out=d_cap, n_inp=n_parts, n_out=n_classes),
+            Routing(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts, n_iters=3),
+            Routing(d_cov=1, d_inp=d_cap, d_out=d_cap, n_inp=n_parts, n_out=n_classes, n_iters=3),
         )
         nn.init.kaiming_normal_(self.detect_parts[0].weight)
         nn.init.zeros_(self.detect_parts[0].bias)

@@ -3,6 +3,17 @@ import torch
 import torch.nn as nn
 
 
+class LeakySoftmax(nn.Module):
+    def __init__(self, dim):
+        super(LeakySoftmax, self).__init__()
+        self.dim = dim
+        
+    def forward(self, inp):
+        maximum = torch.max(inp, self.dim, keepdim=True)
+        power = torch.exp(inp - maximum)
+        return power/torch.sum(power, dim=self.dim, keepdim=True)
+
+
 class Routing(nn.Module):
     """
     Official implementation of the routing algorithm proposed by "An
@@ -74,19 +85,31 @@ class Routing(nn.Module):
             B = B + self.B_brk * torch.linspace(-1, 1, n_out, device=B.device)[:, None, None]  # break symmetry
         V = torch.einsum('ijdh,...icd->...ijch', W, mu_inp) + B
         f_a_inp = self.f(a_inp).unsqueeze(-1)  # [...i1]
-        for iter_num in range(self.n_iters):
+        if self.n_iters > 0:
+            for iter_num in range(self.n_iters):
 
-            # E-step.
-            if iter_num == 0:
-                R = (self.CONST_one / n_out).expand(V.shape[:-2])  # [...ij]
-            else:
-                log_p_simplified = \
-                    - torch.einsum('...ijch,...jch->...ij', V_less_mu_out_2, 1.0 / (2.0 * sig2_out)) \
-                    - sig2_out.sqrt().log().sum((-2, -1)).unsqueeze(-2) if (self.p_model == 'gaussian') \
-                    else self.log_softmax(-V_less_mu_out_2.sum((-2, -1)))  # soft k-means otherwise
-                R = self.softmax(self.log_f(a_out).unsqueeze(-2) + log_p_simplified)  # [...ij]
+                # E-step.
+                if iter_num == 0:
+                    R = (self.CONST_one / n_out).expand(V.shape[:-2])  # [...ij]
+                else:
+                    log_p_simplified = \
+                        - torch.einsum('...ijch,...jch->...ij', V_less_mu_out_2, 1.0 / (2.0 * sig2_out)) \
+                        - sig2_out.sqrt().log().sum((-2, -1)).unsqueeze(-2) if (self.p_model == 'gaussian') \
+                        else self.log_softmax(-V_less_mu_out_2.sum((-2, -1)))  # soft k-means otherwise
+                    R = self.softmax(self.log_f(a_out).unsqueeze(-2) + log_p_simplified)  # [...ij]
 
-            # D-step.
+                # D-step.
+                D_use = f_a_inp * R
+                D_ign = f_a_inp - D_use
+
+                # M-step.
+                a_out = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)  # [...j]
+                over_D_use_sum = 1.0 / (D_use.sum(dim=-2) + self.eps)  # [...j]
+                mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
+                V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
+                sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
+        else:
+            R = (self.CONST_one / n_out).expand(V.shape[:-2])  # [...ij]
             D_use = f_a_inp * R
             D_ign = f_a_inp - D_use
 
@@ -96,5 +119,36 @@ class Routing(nn.Module):
             mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
             V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
             sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
+            
+            last_a = torch.mean(torch.max(self.softmax(a_out), dim=1))
+            ret_a = a_out
+
+            
+            while True:
+  
+                log_p_simplified = \
+                    - torch.einsum('...ijch,...jch->...ij', V_less_mu_out_2, 1.0 / (2.0 * sig2_out)) \
+                    - sig2_out.sqrt().log().sum((-2, -1)).unsqueeze(-2) if (self.p_model == 'gaussian') \
+                    else self.log_softmax(-V_less_mu_out_2.sum((-2, -1)))  # soft k-means otherwise
+                R = self.softmax(self.log_f(a_out).unsqueeze(-2) + log_p_simplified)  # [...ij]
+
+                # D-step.
+                D_use = f_a_inp * R
+                D_ign = f_a_inp - D_use
+
+                # M-step.
+                a_out = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)  # [...j]
+                over_D_use_sum = 1.0 / (D_use.sum(dim=-2) + self.eps)  # [...j]
+                mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
+                V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
+                sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
+                
+                candidate_a = torch.mean(torch.max(self.softmax(a_out), dim=1))
+                # TODO 0.05 is an arbritray epsilon decided by: https://github.com/andyweizhao/NLP-Capsule/blob/master/layer.py
+                if abs(last_a - candidate_a) < 0.05: 
+                    break
+                else:
+                    last_a = candidate_a
+                    ret_a = a_out
 
         return (a_out, mu_out, sig2_out, R) if return_R else (a_out, mu_out, sig2_out)

@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class LeakySoftmax(nn.Module):
@@ -110,6 +111,7 @@ class Routing(nn.Module):
                 sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
         else:
             R = (self.CONST_one / n_out).expand(V.shape[:-2])  # [...ij]
+            
             D_use = f_a_inp * R
             D_ign = f_a_inp - D_use
 
@@ -120,12 +122,17 @@ class Routing(nn.Module):
             V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
             sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
             
-            last_a = torch.mean(torch.max(self.softmax(a_out), dim=1))
+            
+#             last_a = a_out
+#             loss = F.log_softmax(a_out, dim=-1)
+            values, _ = torch.max(self.softmax(a_out), dim=1)
+            last_a = torch.mean(values)
             ret_a = a_out
 
-            
-            while True:
-  
+            count = 0
+            while True and count < 7:
+                count += 1
+                    
                 log_p_simplified = \
                     - torch.einsum('...ijch,...jch->...ij', V_less_mu_out_2, 1.0 / (2.0 * sig2_out)) \
                     - sig2_out.sqrt().log().sum((-2, -1)).unsqueeze(-2) if (self.p_model == 'gaussian') \
@@ -143,12 +150,28 @@ class Routing(nn.Module):
                 V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
                 sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
                 
-                candidate_a = torch.mean(torch.max(self.softmax(a_out), dim=1))
+                values, _ = torch.max(self.softmax(a_out), dim=1)
+                               
+                candidate_a = torch.mean(values)
+                
+#                 print("last_a:", last_a)
+#                 print("candidate_a:", candidate_a)
+
+                # Also try
+                # if candidate_a - last_a < 0:
+                #     break
+
+                # Can also try a version where we iterate til the max score goes down.
+                if candidate_a > last_a: 
+                    ret_a = a_out
+#                 cur_loss = -target * F.log_softmax(a_out, dim=-1)
+#                 print(cur_loss)
+#                 print(loss)
                 # TODO 0.05 is an arbritray epsilon decided by: https://github.com/andyweizhao/NLP-Capsule/blob/master/layer.py
-                if abs(last_a - candidate_a) < 0.05: 
+                if candidate_a - last_a < 0.05 and candidate_a > (1/n_out + 0.05):
+#                     a_out = ret_a
                     break
                 else:
-                    last_a = candidate_a
-                    ret_a = a_out
-
-        return (a_out, mu_out, sig2_out, R) if return_R else (a_out, mu_out, sig2_out)
+                    last_a = candidate_a                 
+#         return (a_out, mu_out, sig2_out, R) if return_R else (a_out, mu_out, sig2_out)
+        return (ret_a, mu_out, sig2_out, R) if return_R else (ret_a, mu_out, sig2_out)

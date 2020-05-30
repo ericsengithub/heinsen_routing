@@ -9,6 +9,12 @@ class LeakySoftmax(nn.Module):
         self.dim = dim
         
     def forward(self, inp):
+#             leak = torch.zeros_like(b_ij).sum(dim=2, keepdim=True)
+#             leaky_logits = torch.cat((leak, b_ij),2)
+#             leaky_routing = F.softmax(leaky_logits, dim=2)
+#             c_ij = leaky_routing[:,:,1:,:].unsqueeze(4)
+        
+        
         maximum = torch.max(inp, self.dim, keepdim=True)
         power = torch.exp(inp - maximum)
         return power/torch.sum(power, dim=self.dim, keepdim=True)

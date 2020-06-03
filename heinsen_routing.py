@@ -244,7 +244,7 @@ class RoutingRNN(nn.Module):
         self.softmax, self.log_softmax = (nn.Softmax(dim=-1), nn.LogSoftmax(dim=-1))
         # If this works abstract out into parameter
         self.hidden_size = 64
-        self.rnnCell = nn.LSTMCell(n_out + n_inp, self.hidden_size, batch_first = True)
+        self.rnnCell = nn.LSTMCell(n_out, self.hidden_size, batch_first = True)
         self.output  = nn.Linear(self.hidden_size, n_out)
         
 
@@ -284,8 +284,8 @@ class RoutingRNN(nn.Module):
 
             # M-step.
             a_temp = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)
-            a_feed = torch.cat((a_temp, a_inp),dim=1)
-            hidden, cell = self.rnnCell(a_feed, hidden, cell)
+#             a_feed = torch.cat((a_temp, a_inp),dim=1)
+            hidden, cell = self.rnnCell(a_temp, hidden, cell)
             a_out = self.output(hidden) 
             
 #             a_out = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)  # [...j]

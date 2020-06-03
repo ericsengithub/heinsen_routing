@@ -119,6 +119,8 @@ class SSTClassifierElu(nn.Module):
         self.depth_emb = nn.Parameter(torch.zeros(d_depth, d_emb))
         self.detect_parts = nn.Sequential(nn.Linear(d_emb, d_inp),
                                           nn.ELU(),
+                                          nn.Linear(d_inp, d_inp),
+                                          Swish(),
                                           nn.LayerNorm(d_inp))
         self.routings = nn.Sequential(
             Routing(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts, n_iters=3),

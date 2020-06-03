@@ -141,12 +141,8 @@ class SSTClassifierElu(nn.Module):
             a, mu, sig2 = routing(a, mu)
 
         return a, mu, sig2
-
     
-    
-    
-    
-class SSTClassifierAttentionDetector(nn.Module):
+class SSTClassifierMoreRouting(nn.Module):
     """
     Args:
         d_depth: int, number of embeddings per token.
@@ -170,8 +166,53 @@ class SSTClassifierAttentionDetector(nn.Module):
         self.depth_emb = nn.Parameter(torch.zeros(d_depth, d_emb))
         self.detect_parts = nn.Sequential(nn.Linear(d_emb, d_inp), Swish(), nn.LayerNorm(d_inp))
         self.routings = nn.Sequential(
-            Routing(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts, n_iters=3),
+            Routing(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts*2, n_iters=3),
+            Routing(d_cov=1, d_inp=d_cap, d_out=d_cap, n_inp=n_parts*2, n_out=n_parts, n_iters=3),
             Routing(d_cov=1, d_inp=d_cap, d_out=d_cap, n_inp=n_parts, n_out=n_classes, n_iters=3),
+        )
+        nn.init.kaiming_normal_(self.detect_parts[0].weight)
+        nn.init.zeros_(self.detect_parts[0].bias)
+
+    def forward(self, mask, embs):
+        a = torch.log(mask / (1.0 - mask))                     # -inf to inf (logit)
+        a = a.unsqueeze(-1).expand(-1, -1, embs.shape[-2])     # [bs, n, d_depth]
+        a = a.contiguous().view(a.shape[0], -1)                # [bs, (n * d_depth)]
+
+        mu = self.detect_parts(embs + self.depth_emb)          # [bs, n, d_depth, d_inp]
+        mu = mu.view(mu.shape[0], -1, 1, mu.shape[-1])         # [bs, (n * d_depth), 1, d_inp]
+
+        for routing in self.routings:
+            a, mu, sig2 = routing(a, mu)
+
+        return a, mu, sig2
+    
+    
+class SSTClassifierCapsuleLSTM(nn.Module):
+    """
+    Args:
+        d_depth: int, number of embeddings per token.
+        d_emb: int, dimension of token embeddings.
+        d_inp: int, number of features computed per embedding.
+        d_cap: int, dimension 2 of output capsules.
+        n_parts: int, number of parts detected.
+        n_classes: int, number of classes.
+
+    Input:
+        mask: [..., n] tensor with 1.0 for tokens, 0.0 for padding.
+        embs: [..., n, d_depth, d_emb] embeddings for n tokens.
+
+    Output:
+        a_out: [..., n_classes] class scores.
+        mu_out: [..., n_classes, 1, d_cap] class capsules.
+        sig2_out: [..., n_classes, 1, d_cap] class capsule variances.
+    """
+    def __init__(self, d_depth, d_emb, d_inp, d_cap, n_parts, n_classes, n_iters=3):
+        super().__init__()
+        self.depth_emb = nn.Parameter(torch.zeros(d_depth, d_emb))
+        self.detect_parts = nn.Sequential(nn.Linear(d_emb, d_inp), Swish(), nn.LayerNorm(d_inp))
+        self.routings = nn.Sequential(
+            RoutingRNN(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts, n_iters=3),
+            RoutingRNN(d_cov=1, d_inp=d_cap, d_out=d_cap, n_inp=n_parts, n_out=n_classes, n_iters=3),
         )
         nn.init.kaiming_normal_(self.detect_parts[0].weight)
         nn.init.zeros_(self.detect_parts[0].bias)

@@ -115,6 +115,7 @@ class Routing(nn.Module):
                 mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
                 V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
                 sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
+            ret_a = a_out
         else:
             R = (self.CONST_one / n_out).expand(V.shape[:-2])  # [...ij]
             

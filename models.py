@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from heinsen_routing import Routing
+from heinsen_routing import Routing, RoutingRNN
 from transformers import GPT2Model
 import torch.nn.functional as F
 # from pytorch_transformers import GPT2Model, GPT2Tokenizer

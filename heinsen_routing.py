@@ -499,7 +499,7 @@ class RoutingRNNLearnedRouting(nn.Module):
         self.softmax, self.log_softmax = (nn.Softmax(dim=-1), nn.LogSoftmax(dim=-1))
         # If this works abstract out into parameter
         self.a_scaler = nn.Linear(n_out, n_out)
-        self.mu_scaler = nn.Linear(n_out*2, n_out)
+        self.mu_scaler = nn.Linear(n_out*4, n_out*2)
         
     def forward(self, a_inp, mu_inp, return_R=False, **kwargs):
         n_inp = a_inp.shape[-1]
@@ -530,8 +530,12 @@ class RoutingRNNLearnedRouting(nn.Module):
         sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
         
         
-        a_out = self.sigmoid(self.a_scaler(a_out))
-        mu_out = mu_out * self.sigmoid(self.mu_scaler(mu_out))
+        mu_shape = mu_out.shape
+        
+        ins = torch.cat((mu_out.reshape(batch_size,-1), sig2_out.reshape(batch_size,-1)), dim=1)
+        
+        a_out = self.f(self.a_scaler(a_out))
+        mu_out = mu_out * self.f(self.mu_scaler(ins)).reshape(mu_shape)
         
              
         return (a_out, mu_out, sig2_out, R) if return_R else (a_out, mu_out, sig2_out)

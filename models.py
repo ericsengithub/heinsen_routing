@@ -275,7 +275,7 @@ class SSTClassifierCapsuleLSTMCombo(nn.Module):
         return a, mu, sig2
 
     
-class SSTClassifierCapsuleLearnedRouting(nn.Module):
+class SSTClassifierLearnedRouting(nn.Module):
     """
     Args:
         d_depth: int, number of embeddings per token.

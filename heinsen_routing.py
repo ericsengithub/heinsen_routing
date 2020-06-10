@@ -497,7 +497,8 @@ class RoutingRNNLearnedRouting(nn.Module):
         self.beta_ign = self.beta_use if single_beta else nn.Parameter(torch.zeros(one_or_n_inp, one_or_n_out))
         self.f, self.log_f = (nn.Sigmoid(), nn.LogSigmoid())
         self.softmax, self.log_softmax = (nn.Softmax(dim=-1), nn.LogSoftmax(dim=-1))
-        # If this works abstract out into parameter
+        # If this works abstract out into parameter       
+        self.R = nn.Parameter((self.CONST_one / n_out))
         self.a_scaler = nn.Linear(n_out, n_out)
         self.mu_scaler = nn.Linear(n_out*4, n_out*2)
         
@@ -516,26 +517,35 @@ class RoutingRNNLearnedRouting(nn.Module):
         V = torch.einsum('ijdh,...icd->...ijch', W, mu_inp) + B
         f_a_inp = self.f(a_inp).unsqueeze(-1)  # [...i1]
         
-        R = (self.CONST_one / n_out).expand(V.shape[:-2])
-        
-        D_use = f_a_inp * R
-        D_ign = f_a_inp - D_use
+        for iter_num in range(self.n_iters):
 
-        # M-step.
-        a_out = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)  # [...j]
-        
-        over_D_use_sum = 1.0 / (D_use.sum(dim=-2) + self.eps)  # [...j]
-        mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
-        V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
-        sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
-        
-        
-        mu_shape = mu_out.shape
-        
-        ins = torch.cat((mu_out.reshape(batch_size,-1), sig2_out.reshape(batch_size,-1)), dim=1)
-        
-        a_out = self.f(self.a_scaler(a_out))
-        mu_out = mu_out * self.f(self.mu_scaler(ins)).reshape(mu_shape)
-        
+            # E-step.
+            if iter_num == 0:
+                R = self.R.expand(V.shape[:-2])  # [...ij]
+            else:
+                log_p_simplified = \
+                    - torch.einsum('...ijch,...jch->...ij', V_less_mu_out_2, 1.0 / (2.0 * sig2_out)) \
+                    - sig2_out.sqrt().log().sum((-2, -1)).unsqueeze(-2) if (self.p_model == 'gaussian') \
+                    else self.log_softmax(-V_less_mu_out_2.sum((-2, -1)))  # soft k-means otherwise
+                R = self.softmax(self.log_f(a_out).unsqueeze(-2) + log_p_simplified)  # [...ij]
+
+            # D-step.
+            D_use = f_a_inp * R
+            D_ign = f_a_inp - D_use
+
+            #         a_out = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)  # [...j]
+            # M-step.
+            a_temp = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)
+            a_out = a_temp * self.f(self.a_scaler(a_temp))
+
+            over_D_use_sum = 1.0 / (D_use.sum(dim=-2) + self.eps)  # [...j]
+            mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
+            V_less_mu_out_2 = (V - mu_out.unsqueeze(-4)) ** 2  # [...ijch]
+            sig2_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V_less_mu_out_2, over_D_use_sum) + self.eps
+
+            mu_shape = mu_out.shape
+            ins = torch.cat((mu_out.reshape(batch_size,-1), sig2_out.reshape(batch_size,-1)), dim=1)
+            mu_out = mu_out * self.f(self.mu_scaler(ins)).reshape(mu_shape)
+
              
         return (a_out, mu_out, sig2_out, R) if return_R else (a_out, mu_out, sig2_out)

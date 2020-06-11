@@ -500,9 +500,16 @@ class RoutingRNNLearnedRouting(nn.Module):
         self.softmax, self.log_softmax = (nn.Softmax(dim=-1), nn.LogSoftmax(dim=-1))
         # If this works abstract out into parameter       
         self.R = nn.Parameter((self.CONST_one / n_out))
-        self.a_scaler = [nn.Linear(n_out, n_out), nn.Linear(n_out, n_out), nn.Linear(n_out,n_out)]
+        self.a_1 = nn.Linear(n_out, n_out)
+        self.a_2 = nn.Linear(n_out, n_out)
+        self.a_3 = nn.Linear(n_out, n_out)
         
-        self.mu_scaler = [nn.Linear(n_out*4, n_out*2),nn.Linear(n_out*4, n_out*2),nn.Linear(n_out*4, n_out*2)]
+        self.mu_1 = nn.Linear(n_out*4, n_out*2)
+        self.mu_2 = nn.Linear(n_out*4, n_out*2)
+        self.mu_3 = nn.Linear(n_out*4, n_out*2)
+        
+        self.a_scaler = [self.a_1, self.a_2, self.a_3]
+        self.mu_scaler = [self.mu_1, self.mu_2, self.mu_3]
         
     def forward(self, a_inp, mu_inp, return_R=False, **kwargs):
         n_inp = a_inp.shape[-1]

@@ -64,7 +64,8 @@ class Routing(nn.Module):
         >>> a_out, mu_out, sig2_out = m(a_inp, mu_inp)
         >>> print(mu_out)  # 10 capsules of shape 4 x 4
     """
-    def __init__(self, d_cov, d_inp, d_out, n_inp=-1, n_out=-1, n_iters=3, single_beta=False, p_model='gaussian', eps=1e-5):
+    # p_model='gaussian'
+    def __init__(self, d_cov, d_inp, d_out, n_inp=-1, n_out=-1, n_iters=3, single_beta=False, p_model='skm', eps=1e-5):
         super().__init__()
         assert p_model in ['gaussian', 'skm'], 'Unrecognized value for p_model.'
         self.n_iters, self.p_model, self.eps = (n_iters, p_model, eps)
@@ -176,7 +177,7 @@ class Routing(nn.Module):
 #                 print(loss)
                 # TODO 0.05 is an arbritray epsilon decided by: https://github.com/andyweizhao/NLP-Capsule/blob/master/layer.py
                 if candidate_a - last_a < 0.05 and candidate_a > (1/n_out + 0.05):
-#                     a_out = ret_a
+                    a_out = ret_a
                     break
                 else:
                     last_a = candidate_a                 
@@ -499,8 +500,9 @@ class RoutingRNNLearnedRouting(nn.Module):
         self.softmax, self.log_softmax = (nn.Softmax(dim=-1), nn.LogSoftmax(dim=-1))
         # If this works abstract out into parameter       
         self.R = nn.Parameter((self.CONST_one / n_out))
-        self.a_scaler = nn.Linear(n_out, n_out)
-        self.mu_scaler = nn.Linear(n_out*4, n_out*2)
+        self.a_scaler = [nn.Linear(n_out, n_out), nn.Linear(n_out, n_out), nn.Linear(n_out,n_out)]
+        
+        self.mu_scaler = [nn.Linear(n_out*4, n_out*2),nn.Linear(n_out*4, n_out*2),nn.Linear(n_out*4, n_out*2)]
         
     def forward(self, a_inp, mu_inp, return_R=False, **kwargs):
         n_inp = a_inp.shape[-1]
@@ -536,7 +538,7 @@ class RoutingRNNLearnedRouting(nn.Module):
             #         a_out = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)  # [...j]
             # M-step.
             a_temp = (self.beta_use * D_use).sum(dim=-2) - (self.beta_ign * D_ign).sum(dim=-2)
-            a_out = a_temp * self.f(self.a_scaler(a_temp))
+            a_out = a_temp * self.f(self.a_scaler[iter_num](a_temp))
 
             over_D_use_sum = 1.0 / (D_use.sum(dim=-2) + self.eps)  # [...j]
             mu_out = torch.einsum('...ij,...ijch,...j->...jch', D_use, V, over_D_use_sum)
@@ -545,7 +547,7 @@ class RoutingRNNLearnedRouting(nn.Module):
 
             mu_shape = mu_out.shape
             ins = torch.cat((mu_out.reshape(batch_size,-1), sig2_out.reshape(batch_size,-1)), dim=1)
-            mu_out = mu_out * self.f(self.mu_scaler(ins)).reshape(mu_shape)
+            mu_out = mu_out * self.f(self.mu_scaler[iter_num](ins)).reshape(mu_shape)
 
              
         return (a_out, mu_out, sig2_out, R) if return_R else (a_out, mu_out, sig2_out)

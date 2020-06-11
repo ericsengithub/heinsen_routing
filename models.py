@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from heinsen_routing import Routing, RoutingRNN, RoutingRNNCombo, RoutingRNNLearnedRouting
-from transformers import GPT2Model
+from transformers import GPT2Model, AlbertModel
 import torch.nn.functional as F
 # from pytorch_transformers import GPT2Model, GPT2Tokenizer
 
@@ -17,15 +17,15 @@ class Swish(nn.Module):
 class GPT2Classifier(nn.Module):
     def __init__(self, n_classes):
         super(GPT2Classifier, self).__init__()
-        self.GPT2 = GPT2Model.from_pretrained('gpt2-large')
+        self.GPT2 = AlbertModel.from_pretrained('albert-base-v2')#GPT2Model.from_pretrained('gpt2-large')
         
         self.rnn = nn.GRU(self.GPT2.config.hidden_size,
-                  256,
-                  num_layers = 2,
+                  64,
+                  num_layers = 1,
                   bidirectional = True,
                   batch_first = True)
         
-        self.out = nn.Linear(256 * 2, n_classes)
+        self.out = nn.Linear(64 * 2, n_classes)
     
     def forward(self, masks, input_ids):
         # Ideally we would fine tune but it is way too large.
@@ -47,7 +47,52 @@ class GPT2Classifier(nn.Module):
         #output = [batch size, out dim]
         
         return output
-        
+
+    
+# class SSTClassifierW2V(nn.Module):
+#     """
+#     Args:
+#         d_depth: int, number of embeddings per token.
+#         d_emb: int, dimension of token embeddings.
+#         d_inp: int, number of features computed per embedding.
+#         d_cap: int, dimension 2 of output capsules.
+#         n_parts: int, number of parts detected.
+#         n_classes: int, number of classes.
+
+#     Input:
+#         mask: [..., n] tensor with 1.0 for tokens, 0.0 for padding.
+#         embs: [..., n, d_depth, d_emb] embeddings for n tokens.
+
+#     Output:
+#         a_out: [..., n_classes] class scores.
+#         mu_out: [..., n_classes, 1, d_cap] class capsules.
+#         sig2_out: [..., n_classes, 1, d_cap] class capsule variances.
+#     """
+#     def __init__(self, d_depth, d_emb, d_inp, d_cap, n_parts, n_classes, weights, n_iters=3):
+#         super().__init__()
+#         self.embedding = nn.Embedding.from_pretrained(weights)
+#         self.depth_emb = nn.Parameter(torch.zeros(d_depth, d_emb))
+#         self.detect_parts = nn.Sequential(nn.Linear(d_emb, d_inp), Swish(), nn.LayerNorm(d_inp))
+#         self.routings = nn.Sequential(
+#             Routing(d_cov=1, d_inp=d_inp, d_out=d_cap, n_out=n_parts, n_iters=n_iters),
+#             Routing(d_cov=1, d_inp=d_cap, d_out=d_cap, n_inp=n_parts, n_out=n_classes, n_iters=n_iters),
+#         )
+#         nn.init.kaiming_normal_(self.detect_parts[0].weight)
+#         nn.init.zeros_(self.detect_parts[0].bias)
+
+#     def forward(self, embs):
+#         a = torch.log(torch.zeros(embs.shape))  # -inf to inf (logit)
+#         a = a.unsqueeze(-1).expand(-1, -1, embs.shape[-2])     # [bs, n, d_depth]
+#         a = a.contiguous().view(a.shape[0], -1)                # [bs, (n * d_depth)]
+
+#         embs = self.embedding(embs)
+#         mu = self.detect_parts(embs + self.depth_emb)          # [bs, n, d_depth, d_inp]
+#         mu = mu.view(mu.shape[0], -1, 1, mu.shape[-1])         # [bs, (n * d_depth), 1, d_inp]
+
+#         for routing in self.routings:
+#             a, mu, sig2 = routing(a, mu)
+
+#         return a, mu, sig2
     
     
     
